@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No .env committed
+        run: |
+          if git ls-files | grep -qx ".env"; then
+            echo ".env is tracked - refusing (secrets risk)"; exit 1;
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ETL deps (light, no torch)
+        run: pip install requests psycopg2-binary python-dotenv pypdf
+
+      - name: Compile check (etl + api + tests)
+        run: python -m compileall -q etl api tests
+
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Validate docker compose files
+        run: |
+          cp .env.example .env
+          docker compose config --quiet

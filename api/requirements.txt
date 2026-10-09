@@ -1,0 +1,9 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+scalar-fastapi>=1.0
+mcp>=1.28,<2
+psycopg2-binary>=2.9
+requests>=2.31
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.4
+sentence-transformers>=3.0

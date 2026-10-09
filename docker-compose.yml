@@ -1,0 +1,99 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    shm_size: 512m
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-secop}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secop}
+      POSTGRES_DB: ${POSTGRES_DB:-secop}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U secop"]
+      interval: 5s
+      retries: 10
+
+  etl:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-secop}:${POSTGRES_PASSWORD:-secop}@db:5432/${POSTGRES_DB:-secop}
+    command: ["python", "-m", "etl.sync", "--dataset", "all", "--page-size", "2000"]
+    volumes:
+      - docsdata:/data/docs
+
+  # Llenado diario: loop incremental (arrancar con --profile daily).
+  scheduler:
+    build: .
+    profiles: ["daily"]
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-secop}:${POSTGRES_PASSWORD:-secop}@db:5432/${POSTGRES_DB:-secop}
+      REPEAT_SECONDS: "86400"
+      SCHED_DATASETS: "secop2_procesos,secop2_docs_2025"
+    command: ["python", "-m", "etl.scheduler"]
+    restart: unless-stopped
+
+  # API lectura + Scalar (/scalar) + MCP (/mcp). Solo-lectura.
+  api:
+    image: volute-api
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-secop}:${POSTGRES_PASSWORD:-secop}@db:5432/${POSTGRES_DB:-secop}
+      HF_HOME: /data/models
+      SENTENCE_TRANSFORMERS_HOME: /data/models
+    ports:
+      - "8000:8000"
+    volumes:
+      - modelcache:/data/models
+    restart: unless-stopped
+
+  # MCP remoto (SSE + messages). STDIO: `docker compose run --rm api python -m api.mcp_server`
+  mcp:
+    image: volute-api
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-secop}:${POSTGRES_PASSWORD:-secop}@db:5432/${POSTGRES_DB:-secop}
+    ports:
+      - "8001:8001"
+    command: ["python", "-m", "api.mcp_server", "--sse"]
+    restart: unless-stopped
+
+  # Worker embeddings (una pasada manual: make embed). Cache modelo en volumen.
+  embed:
+    build:
+      context: .
+      dockerfile: Dockerfile.embed
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-secop}:${POSTGRES_PASSWORD:-secop}@db:5432/${POSTGRES_DB:-secop}
+    volumes:
+      - modelcache:/data/models
+
+volumes:
+  pgdata:
+  docsdata:
+  modelcache:

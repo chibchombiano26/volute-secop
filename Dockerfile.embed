@@ -1,0 +1,9 @@
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
+    "torch>=2.4" "sentence-transformers>=3.0"
+COPY etl ./etl
+ENV HF_HOME=/data/models SENTENCE_TRANSFORMERS_HOME=/data/models
+CMD ["python", "-m", "etl.embed", "--limit", "5000"]
